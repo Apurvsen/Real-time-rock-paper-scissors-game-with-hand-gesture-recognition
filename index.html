@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPS Arcade — Hand Gesture Showdown</title>
+    <meta name="description" content="Rock Paper Scissors arcade showdown — play the computer using real hand gestures read live from your webcam.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%8A%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Teko:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- MediaPipe Hands + Camera Utils (CDN, no WASM server needed) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="scanlines" aria-hidden="true"></div>
+
+<div class="cabinet">
+
+    <!-- Marquee / Header -->
+    <header class="marquee">
+        <div class="marquee-inner">
+            <div class="marquee-title">
+                <span class="glyphs" aria-hidden="true">✊ ✋ ✌️</span>
+                <h1>ROCK · PAPER · SCISSORS</h1>
+            </div>
+            <div class="marquee-tag">
+                <span class="coin-badge">1P · CAM MODE</span>
+                <p>Throw a real hand sign at your webcam and take on the CPU</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- HUD Scoreboard (fighting-game health-bar style) -->
+    <section class="hud" aria-label="Scoreboard">
+        <div class="hud-side hud-you">
+            <span class="hud-tag">YOU</span>
+            <span class="hud-num" id="scorePlayer">0</span>
+        </div>
+
+        <div class="hud-mid">
+            <div class="hud-chip">
+                <span class="hud-chip-label">DRAWS</span>
+                <span class="hud-chip-num" id="scoreDraw">0</span>
+            </div>
+            <div class="hud-vs">VS</div>
+            <div class="hud-chip">
+                <span class="hud-chip-label">STREAK</span>
+                <span class="hud-chip-num" id="scoreStreak">🔥 0</span>
+            </div>
+        </div>
+
+        <div class="hud-side hud-cpu">
+            <span class="hud-tag">CPU</span>
+            <span class="hud-num" id="scoreCPU">0</span>
+        </div>
+    </section>
+
+    <!-- Battle Arena -->
+    <main class="arena">
+
+        <!-- Player Panel -->
+        <div class="fighter-card p1">
+            <div class="fighter-top">
+                <div class="fighter-name">
+                    <span class="dot" id="camDot"></span>
+                    PLAYER ONE
+                </div>
+                <div class="gesture-pill" id="gesturePill">
+                    <span id="gestureEmoji">🔍</span>
+                    <span id="gestureLabel">Initializing…</span>
+                </div>
+            </div>
+
+            <!-- Video container: video and canvas stacked -->
+            <div class="cam-box" id="camBox">
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="canvas"></canvas>
+                <!-- Loading overlay -->
+                <div class="cam-overlay" id="camOverlay">
+                    <div class="loader"></div>
+                    <p id="camMsg">Loading AI model…<br><small>First load may take 5–10 seconds</small></p>
+                </div>
+                <!-- Freeze overlay shown at round end -->
+                <div class="freeze-overlay" id="freezeOverlay">
+                    <span id="freezeEmoji"></span>
+                </div>
+            </div>
+
+            <div class="cam-controls">
+                <button id="btnMirror" class="btn btn-sm">🔄 Mirror</button>
+                <button id="btnToggleCam" class="btn btn-sm">📹 Camera</button>
+            </div>
+        </div>
+
+        <!-- Center Panel -->
+        <div class="ring-panel">
+            <div class="ring-label">ROUND</div>
+
+            <div class="battle-info">
+                <div class="countdown" id="countdown" style="display:none">
+                    <span id="cdNumber">3</span>
+                </div>
+                <div class="result-box" id="resultBox">
+                    <span class="result-title" id="resultTitle">Ready?</span>
+                    <span class="result-sub" id="resultSub">Show a hand sign, then hit THROW!</span>
+                </div>
+            </div>
+
+            <div class="center-actions">
+                <button class="btn btn-play" id="btnPlay" disabled>▶ THROW</button>
+                <div class="small-actions">
+                    <button class="btn btn-sm" id="btnAuto">⚡ Auto: OFF</button>
+                    <button class="btn btn-sm" id="btnReset">🗑️ Reset</button>
+                    <button class="btn btn-icon" id="btnSound">🔊</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Computer Panel -->
+        <div class="fighter-card p2">
+            <div class="fighter-top">
+                <div class="fighter-name">🤖 CPU CHALLENGER</div>
+                <div class="cpu-badge" id="cpuBadge">Waiting…</div>
+            </div>
+            <div class="cpu-stage">
+                <span class="cpu-avatar">🤖</span>
+                <span class="cpu-move" id="cpuMove">❓</span>
+                <span class="cpu-label" id="cpuLabel">Waiting for you</span>
+            </div>
+            <div class="cpu-stat">DIFFICULTY: <strong>Fair Random</strong></div>
+        </div>
+
+    </main>
+
+    <!-- Move list / gesture guide -->
+    <section class="movelist">
+        <h3>MOVE LIST</h3>
+        <div class="movelist-grid">
+            <div class="move-item" id="gRock">
+                <span class="m-emoji">✊</span>
+                <div>
+                    <h4>ROCK</h4>
+                    <p>Make a closed fist</p>
+                </div>
+                <span class="m-tag">Beats Scissors</span>
+            </div>
+            <div class="move-item" id="gPaper">
+                <span class="m-emoji">✋</span>
+                <div>
+                    <h4>PAPER</h4>
+                    <p>Open flat hand</p>
+                </div>
+                <span class="m-tag">Beats Rock</span>
+            </div>
+            <div class="move-item" id="gScissors">
+                <span class="m-emoji">✌️</span>
+                <div>
+                    <h4>SCISSORS</h4>
+                    <p>Index + middle finger up</p>
+                </div>
+                <span class="m-tag">Beats Paper</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Match history -->
+    <section class="roundlog">
+        <div class="roundlog-header">
+            <h3>ROUND LOG</h3>
+            <span id="histCount">0 Rounds</span>
+        </div>
+        <div class="roundlog-list" id="histList">
+            <p class="empty-msg">No rounds yet — start a match!</p>
+        </div>
+    </section>
+
+    <footer class="footer">RPS Arcade · Powered by MediaPipe Hand Tracking</footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
